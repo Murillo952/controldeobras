@@ -12,6 +12,7 @@ import {
 } from "./lib/api.js";
 import Login from "./components/Login.jsx";
 import Dashboard from "./components/ControlDeObras.jsx";
+import { saveSnapshot, loadSnapshot, clearSnapshot } from "./lib/offlineCache.js";
 
 function FullScreenMessage({ children }) {
   return (
@@ -28,6 +29,7 @@ export default function App() {
   const [profiles, setProfiles] = useState([]);
   const [activity, setActivity] = useState([]);
   const [loadError, setLoadError] = useState("");
+  const [offlineSnapshot, setOfflineSnapshot] = useState(null); // fecha del respaldo local en uso, o null si los datos son en vivo
 
   // 1) Escucha la sesión de Supabase (login / logout)
   useEffect(() => {
@@ -43,6 +45,8 @@ export default function App() {
         setProjects(null);
         setProfiles([]);
         setActivity([]);
+        setOfflineSnapshot(null);
+        clearSnapshot();
       }
     });
     return () => listener.subscription.unsubscribe();
@@ -62,13 +66,31 @@ export default function App() {
       setProfile(myProfile);
       const projectsData = await fetchProjects();
       setProjects(projectsData);
+      let loadedProfiles = [];
+      let loadedActivity = [];
       if (myProfile.role === "Administrador") {
         const [allProfiles, recentActivity] = await Promise.all([fetchProfiles(), fetchRecentActivity()]);
+        loadedProfiles = allProfiles;
+        loadedActivity = recentActivity;
         setProfiles(allProfiles);
         setActivity(recentActivity);
       }
+      // Todo cargó bien desde Supabase: guarda una copia local y se sale del modo "sin conexión" si estaba activo.
+      setOfflineSnapshot(null);
+      saveSnapshot({ profile: myProfile, projects: projectsData, profiles: loadedProfiles, activity: loadedActivity });
     } catch (err) {
-      setLoadError(err.message || String(err));
+      // Sin conexión (u otro error de red): si hay un respaldo local de una sesión anterior, se usa
+      // para poder seguir viendo/trabajando con la última información conocida en vez de bloquear la app.
+      const snapshot = loadSnapshot();
+      if (snapshot && snapshot.profile) {
+        setProfile(snapshot.profile);
+        setProjects(snapshot.projects || []);
+        setProfiles(snapshot.profiles || []);
+        setActivity(snapshot.activity || []);
+        setOfflineSnapshot(snapshot.savedAt || true);
+      } else {
+        setLoadError(err.message || String(err));
+      }
     }
   }, []);
 
@@ -80,6 +102,15 @@ export default function App() {
       loadAll(session.user.id);
     }
   }, [session, loadAll]);
+
+  // Si estábamos mostrando el respaldo local (sin conexión) y vuelve la conexión,
+  // se reintenta cargar en vivo desde Supabase automáticamente.
+  useEffect(() => {
+    if (!offlineSnapshot || !session) return;
+    const retry = () => loadAll(session.user.id);
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, [offlineSnapshot, session, loadAll]);
 
   if (!isSupabaseConfigured) return <Login />;
   if (session === undefined) return <FullScreenMessage>Cargando…</FullScreenMessage>;
@@ -104,6 +135,7 @@ export default function App() {
       profile={profile}
       initialProjects={projects}
       profiles={profiles}
+      offlineSnapshot={offlineSnapshot}
       onRefreshProfiles={async () => setProfiles(await fetchProfiles())}
       initialActivity={activity}
       onLogout={() => supabase.auth.signOut()}

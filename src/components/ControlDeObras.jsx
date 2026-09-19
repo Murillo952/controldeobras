@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   Building2,
   LayoutGrid,
@@ -32,6 +32,8 @@ import {
   LogOut,
 } from "lucide-react";
 import { genId } from "../lib/api.js";
+import { money, num2, expenseCategories } from "../lib/format.js";
+import { REPORTS, exportReportToPDF, exportReportToExcel } from "../lib/reports.js";
 import UsersView from "./UsersView.jsx";
 import {
   LineChart,
@@ -56,13 +58,9 @@ import {
    Línea:  #E3E1DB
    ============================================================ */
 
-const money = (n) =>
-  "Bs " +
-  Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-// Igual que money() pero sin el prefijo "Bs" — para cantidades, horas, porcentajes, etc.
-// Formato: coma (,) como separador de miles y punto (.) como separador decimal — ej. 1,234.56
-const num2 = (n) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// money(), num2() y expenseCategories ahora viven en ../lib/format.js
+// (se importan arriba) para poder reutilizarlos también desde
+// ../lib/reports.js sin crear un import circular.
 
 // --- Ayudantes de fechas para el selector de periodo de Reportes (fechas guardadas como "AAAA-MM-DD") ---
 function monthToRange(monthStr) {
@@ -209,7 +207,6 @@ const statusStyle = {
   Paralizado: { bg: "bg-red-50", text: "text-red-700", dot: "bg-red-700" },
 };
 
-const expenseCategories = ["Materiales", "Mano de Obra", "Maquinaria", "Gastos de Operación", "Impuestos", "Utilidades", "Otros"];
 const incomeTypesDefault = [
   "Anticipo",
   "Préstamo",
@@ -1967,20 +1964,9 @@ function FisicoTab({ project, setProject, onLog, role }) {
 --------------------------------------------------------- */
 
 function ReportesTab({ project }) {
-  const reports = [
-    "Reporte financiero completo",
-    "Ingresos",
-    "Egresos por categoría",
-    "Ítems y avance",
-    "Ejecución diaria",
-    "Materiales",
-    "Materiales asignados por ítem",
-    "Mano de obra",
-    "Maquinaria",
-    "Gastos de operación",
-    "Curva S",
-    "Reporte completo del proyecto",
-  ];
+  const reports = REPORTS;
+  const [exportingKey, setExportingKey] = useState(""); // "<reporte>-pdf" | "<reporte>-excel"
+  const [exportError, setExportError] = useState("");
 
   const [rangeMode, setRangeMode] = useState("rango");
   const [dateFrom, setDateFrom] = useState("");
@@ -2073,34 +2059,49 @@ function ReportesTab({ project }) {
 
       <div>
         <SectionHeader title="Reportes disponibles" />
+        {exportError && (
+          <p className="text-xs text-red-700 bg-red-50 rounded-lg px-2.5 py-1.5 mb-2">{exportError}</p>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {reports.map((r) => (
-            <div key={r} className="bg-white border border-stone-200 rounded-xl p-4 flex items-center justify-between gap-2">
-              <span className="text-sm text-slate-800 font-medium">{r}</span>
-              <div className="flex gap-1.5 shrink-0">
-                <button
-                  onClick={() =>
-                    alert(
-                      `Vista previa — se generará "${r}" en PDF para el periodo ${periodLabel} (${countIncome} ingresos, ${countExpense} egresos, ${countExec} ejecuciones, ${countMat} materiales). La exportación real se conecta en la Fase 3.`
-                    )
-                  }
-                  className="text-xs px-2 py-1 rounded-md border border-stone-300 text-gray-500 hover:bg-stone-100 flex items-center gap-1"
-                >
-                  <FileDown size={12} /> PDF
-                </button>
-                <button
-                  onClick={() =>
-                    alert(
-                      `Vista previa — se generará "${r}" en Excel para el periodo ${periodLabel} (${countIncome} ingresos, ${countExpense} egresos, ${countExec} ejecuciones, ${countMat} materiales). La exportación real se conecta en la Fase 3.`
-                    )
-                  }
-                  className="text-xs px-2 py-1 rounded-md border border-stone-300 text-gray-500 hover:bg-stone-100 flex items-center gap-1"
-                >
-                  <FileDown size={12} /> Excel
-                </button>
+          {reports.map((r) => {
+            const doExport = (kind) => {
+              const key = `${r}-${kind}`;
+              setExportError("");
+              setExportingKey(key);
+              // setTimeout deja pintar el estado "generando..." antes del trabajo síncrono de armar el archivo
+              setTimeout(() => {
+                try {
+                  if (kind === "pdf") exportReportToPDF(r, project, periodLabel, inRange);
+                  else exportReportToExcel(r, project, periodLabel, inRange);
+                } catch (err) {
+                  setExportError(`No se pudo generar "${r}" en ${kind === "pdf" ? "PDF" : "Excel"}: ${err.message || err}`);
+                } finally {
+                  setExportingKey("");
+                }
+              }, 30);
+            };
+            return (
+              <div key={r} className="bg-white border border-stone-200 rounded-xl p-4 flex items-center justify-between gap-2">
+                <span className="text-sm text-slate-800 font-medium">{r}</span>
+                <div className="flex gap-1.5 shrink-0">
+                  <button
+                    onClick={() => doExport("pdf")}
+                    disabled={exportingKey === `${r}-pdf`}
+                    className="text-xs px-2 py-1 rounded-md border border-stone-300 text-gray-500 hover:bg-stone-100 flex items-center gap-1 disabled:opacity-50"
+                  >
+                    <FileDown size={12} /> {exportingKey === `${r}-pdf` ? "Generando…" : "PDF"}
+                  </button>
+                  <button
+                    onClick={() => doExport("excel")}
+                    disabled={exportingKey === `${r}-excel`}
+                    className="text-xs px-2 py-1 rounded-md border border-stone-300 text-gray-500 hover:bg-stone-100 flex items-center gap-1 disabled:opacity-50"
+                  >
+                    <FileSpreadsheet size={12} /> {exportingKey === `${r}-excel` ? "Generando…" : "Excel"}
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -2236,6 +2237,7 @@ export default function Dashboard({
   profile,
   initialProjects,
   profiles,
+  offlineSnapshot,
   onRefreshProfiles,
   initialActivity,
   onLogout,
@@ -2273,17 +2275,52 @@ export default function Dashboard({
 
   const selected = projects.find((p) => p.id === selectedId);
 
+  // Cambios que quedaron pendientes de sincronizar (p. ej. por estar sin conexión):
+  // projectId -> estado del proyecto ANTES del primer cambio que no se pudo guardar.
+  // Se reintenta automáticamente cuando vuelve la conexión (ver efecto más abajo).
+  const pendingSyncRef = useRef({});
+
   // Guarda el proyecto localmente (respuesta inmediata) y sincroniza con
-  // Supabase en segundo plano. Si algo falla al guardar, se avisa igual.
+  // Supabase en segundo plano. Si algo falla al guardar (p. ej. sin conexión),
+  // el cambio queda en memoria y se reintenta solo al reconectarse.
   const setSelectedProject = (updated) => {
     const old = projects.find((p) => p.id === updated.id);
     setProjects(projects.map((p) => (p.id === updated.id ? updated : p)));
     if (old) {
-      onPersistProjectChange(old, updated).catch((err) => {
-        setSavingError(`No se pudo guardar en la base de datos: ${err.message || err}`);
-      });
+      if (!(updated.id in pendingSyncRef.current)) pendingSyncRef.current[updated.id] = old;
+      onPersistProjectChange(old, updated)
+        .then(() => {
+          delete pendingSyncRef.current[updated.id];
+        })
+        .catch((err) => {
+          setSavingError(`No se pudo guardar en la base de datos: ${err.message || err}`);
+        });
     }
   };
+
+  // Al recuperar la conexión, reintenta guardar cualquier cambio que se hizo mientras
+  // estaba offline (comparando contra el estado justo antes del primer cambio fallido).
+  useEffect(() => {
+    const retryPending = () => {
+      const pendingIds = Object.keys(pendingSyncRef.current);
+      if (pendingIds.length === 0) return;
+      pendingIds.forEach((pid) => {
+        const baseline = pendingSyncRef.current[pid];
+        const current = projects.find((p) => p.id === pid);
+        if (!current) return;
+        onPersistProjectChange(baseline, current)
+          .then(() => {
+            delete pendingSyncRef.current[pid];
+            setSavingError("");
+          })
+          .catch((err) => {
+            setSavingError(`No se pudo sincronizar el proyecto "${current.name}": ${err.message || err}`);
+          });
+      });
+    };
+    window.addEventListener("online", retryPending);
+    return () => window.removeEventListener("online", retryPending);
+  }, [projects, onPersistProjectChange]);
 
   const residentOptions = (profiles || []).filter((p) => p.role === "Residente");
 
@@ -2326,7 +2363,13 @@ export default function Dashboard({
 
   const content = (
     <div className={`flex ${isMobile ? "flex-col" : ""} bg-stone-100 text-slate-800`} style={{ minHeight: isMobile ? 700 : 640, fontFamily: "'Inter', ui-sans-serif, system-ui" }}>
-      {!isOnline && (
+      {offlineSnapshot && (
+        <div className="w-full bg-amber-600 text-white text-xs px-4 py-1.5 flex items-center gap-1.5 justify-center order-first">
+          <WifiOff size={12} /> Sin conexión — mostrando la última información guardada en este dispositivo
+          {typeof offlineSnapshot === "string" ? ` (${new Date(offlineSnapshot).toLocaleString("es-BO")})` : ""}. Los cambios se sincronizarán cuando vuelva la conexión.
+        </div>
+      )}
+      {!offlineSnapshot && !isOnline && (
         <div className="w-full bg-amber-600 text-white text-xs px-4 py-1.5 flex items-center gap-1.5 justify-center order-first">
           <WifiOff size={12} /> Sin conexión — reconéctate para poder guardar tus registros.
         </div>
