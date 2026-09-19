@@ -22,7 +22,45 @@ function FullScreenMessage({ children }) {
   );
 }
 
+// Red de seguridad: si algo inesperado falla al renderizar el Dashboard (por ejemplo,
+// un dato con forma rara que llegó del respaldo local sin conexión), esto evita que la
+// pantalla quede en blanco y en su lugar muestra un aviso con opción de recargar.
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error) {
+    console.error("Error inesperado en la app:", error);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <FullScreenMessage>
+          Ocurrió un error inesperado mostrando la aplicación.
+          <br />
+          <button className="text-orange-600 underline mt-2" onClick={() => window.location.reload()}>
+            Recargar
+          </button>
+        </FullScreenMessage>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppInner />
+    </ErrorBoundary>
+  );
+}
+
+function AppInner() {
   const [session, setSession] = useState(undefined); // undefined = todavía no se sabe
   const [profile, setProfile] = useState(null);
   const [projects, setProjects] = useState(null);
@@ -39,6 +77,15 @@ export default function App() {
     }
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      // Supabase intenta renovar el token de sesión en segundo plano. Si en ese momento
+      // no hay internet, esa renovación falla y la librería puede avisar "sesión nula"
+      // como si hubieras cerrado sesión, aunque el usuario nunca lo pidió. Si eso pasa
+      // mientras estamos sin conexión, lo ignoramos: la app se queda con lo que ya tenía
+      // cargado (o con el respaldo local) en vez de expulsar al usuario a la pantalla de
+      // Login sin avisar.
+      if (!newSession && typeof navigator !== "undefined" && !navigator.onLine) {
+        return;
+      }
       setSession(newSession);
       if (!newSession) {
         setProfile(null);
