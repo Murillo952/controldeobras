@@ -2362,20 +2362,20 @@ export default function Dashboard({
   };
 
   const content = (
-    <div className={`flex ${isMobile ? "flex-col" : ""} bg-stone-100 text-slate-800`} style={{ minHeight: isMobile ? 700 : 640, fontFamily: "'Inter', ui-sans-serif, system-ui" }}>
+    <div className={`flex flex-col bg-stone-100 text-slate-800`} style={{ minHeight: isMobile ? 700 : 640, fontFamily: "'Inter', ui-sans-serif, system-ui" }}>
       {offlineSnapshot && (
-        <div className="w-full bg-amber-600 text-white text-xs px-4 py-1.5 flex items-center gap-1.5 justify-center order-first">
+        <div className="w-full bg-amber-600 text-white text-xs px-4 py-1.5 flex items-center gap-1.5 justify-center shrink-0">
           <WifiOff size={12} /> Sin conexión — mostrando la última información guardada en este dispositivo
           {typeof offlineSnapshot === "string" ? ` (${new Date(offlineSnapshot).toLocaleString("es-BO")})` : ""}. Los cambios se sincronizarán cuando vuelva la conexión.
         </div>
       )}
       {!offlineSnapshot && !isOnline && (
-        <div className="w-full bg-amber-600 text-white text-xs px-4 py-1.5 flex items-center gap-1.5 justify-center order-first">
+        <div className="w-full bg-amber-600 text-white text-xs px-4 py-1.5 flex items-center gap-1.5 justify-center shrink-0">
           <WifiOff size={12} /> Sin conexión — reconéctate para poder guardar tus registros.
         </div>
       )}
       {savingError && (
-        <div className="w-full bg-red-600 text-white text-xs px-4 py-1.5 flex items-center gap-1.5 justify-between order-first">
+        <div className="w-full bg-red-600 text-white text-xs px-4 py-1.5 flex items-center gap-1.5 justify-between shrink-0">
           <span>{savingError}</span>
           <button onClick={() => setSavingError("")} className="underline">
             Cerrar
@@ -2383,6 +2383,11 @@ export default function Dashboard({
         </div>
       )}
 
+      {/* Fila principal: sidebar (o barra inferior) + contenido. Va en su propio contenedor
+          flex (fila en escritorio, columna en celular) para que las franjas de arriba
+          (sin conexión / error de guardado) siempre ocupen el ancho completo por su cuenta,
+          en vez de competir por espacio con el sidebar dentro de la misma fila flex. */}
+      <div className={`flex ${isMobile ? "flex-col" : ""} flex-1 min-h-0`}>
       {/* SIDEBAR (escritorio) */}
       {!isMobile && (
         <aside className="w-52 bg-slate-800 text-white flex flex-col shrink-0">
@@ -2566,6 +2571,7 @@ export default function Dashboard({
           </button>
         </div>
       )}
+      </div>
     </div>
   );
 
